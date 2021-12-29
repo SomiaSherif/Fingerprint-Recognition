@@ -1,0 +1,423 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[198]:
+
+
+import numpy as np
+import pandas as pd
+import cv2
+import os
+import pathlib
+
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dropout, Flatten, Dense, Layer, BatchNormalization
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from keras.preprocessing.image import ImageDataGenerator, load_img
+
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
+
+import warnings
+warnings.filterwarnings('ignore')
+
+
+# In[78]:
+
+
+classes = {"Altered-Easy": "0", "Altered-Hard": "1", "Altered-Medium": "2"}
+allFilenames = []
+allCategories = []
+for classElement in classes:
+    filenames = os.listdir("C:/Users/ranya/Downloads/SOCOFing/Altered/"+classElement)
+   
+    allFilenames += [classElement + "/" + file for file in filenames]
+    allCategories += [classes[classElement]] * len(filenames)
+
+
+df = pd.DataFrame({
+    'filename': allFilenames,
+    'class': allCategories
+})
+
+
+# In[199]:
+
+
+df
+
+
+# In[200]:
+
+
+allFilenames_test = []
+allCategories_test = []
+for classElement in classes:
+    filenames = os.listdir("C:/Users/ranya/Downloads/SOCOFing/SOCOFing/Altered/" + classElement)
+    allFilenames_test += [classElement + "/" + file for file in filenames]
+    allCategories_test += [classes[classElement]] * len(filenames)
+
+
+df_test = pd.DataFrame({
+    'filename': allFilenames_test,
+    'class': allCategories_test
+})
+
+
+# In[201]:
+
+
+df.head()
+
+
+# In[202]:
+
+
+x = ['Altered-Easy', 'Altered-Hard', 'Altered-Medium']
+y = [len(df[df["class"] == "0"]), len(df[df["class"] == "1"]), len(df[df["class"] == "2"])]
+
+fig = go.Figure(data=[go.Bar(x = x, y = y)])
+fig.update_layout(title_text = 'Distribution of classes')
+fig.show()
+
+
+# In[203]:
+
+
+df_training, df_validation = train_test_split(df, test_size = 0.20)
+df_training = df_training.reset_index(drop = True)
+df_validation = df_validation.reset_index(drop = True)
+
+
+# In[204]:
+
+
+df_training
+
+
+# In[205]:
+
+
+train_datagen = ImageDataGenerator(
+    rotation_range = 45,
+    width_shift_range = 0.2,  
+    height_shift_range = 0.2,    
+    zoom_range = 0.2,        
+    horizontal_flip = True, 
+    rescale = 1./255,
+    fill_mode = 'reflect'
+)
+
+train_generator = train_datagen.flow_from_dataframe(
+    df_training, 
+    "C:/Users/ranya/Downloads/SOCOFing/Altered", 
+    x_col = 'filename',
+    y_col = 'class',
+    target_size = (96, 103),
+    class_mode = 'categorical',
+    batch_size = 64
+)
+
+
+# In[206]:
+
+
+df_example = df_training.sample(n=1).reset_index(drop=True)
+example_generator = train_datagen.flow_from_dataframe(
+    df_example, 
+    "C:/Users/ranya/Downloads/SOCOFing/Altered", 
+    x_col='filename',
+    y_col='class',
+    target_size = (96, 103),
+    class_mode='categorical'
+)
+
+
+# The result of data augmentation:
+
+# In[208]:
+
+
+plt.figure(figsize=(12, 12))
+for i in range(0, 15):
+    plt.subplot(5, 3, i+1)
+    for X_batch, Y_batch in example_generator:
+        image = X_batch[0]
+        plt.imshow(image)
+        break
+plt.tight_layout()
+plt.show()
+
+
+# In[209]:
+
+
+validation_datagen = ImageDataGenerator(rescale = 1./255)
+validation_generator = validation_datagen.flow_from_dataframe(
+    df_validation, 
+    "C:/Users/ranya/Downloads/SOCOFing/Altered", 
+    x_col = 'filename',
+    y_col = 'class',
+    target_size = (96, 103),
+    class_mode = 'categorical',
+    batch_size = 64
+)
+
+
+# <a id="3"></a>
+# # Create model
+
+# In[210]:
+
+
+model = Sequential()
+
+
+
+model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(96, 103, 3)))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+
+
+model.add(Conv2D(64, (3, 3), activation='relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+
+
+model.add(Conv2D(128, (3, 3), activation='relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+
+
+model.add(Flatten())
+model.add(Dense(512, activation='relu'))
+model.add(BatchNormalization())
+model.add(Dropout(0.5))
+model.add(Dense(3, activation='softmax'))
+
+
+
+model.compile(loss='categorical_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
+
+model.summary()
+
+
+# In[211]:
+
+
+early_stopping = EarlyStopping(patience=10)
+
+reduce_lr = ReduceLROnPlateau(monitor = 'val_acc', patience = 3, factor = 0.5, min_lr = 0.00001)
+
+callbacks = [early_stopping, reduce_lr]
+
+
+# In[212]:
+
+
+history = model.fit_generator(
+    train_generator, 
+    epochs = 5,
+    validation_data = validation_generator,
+    callbacks = callbacks
+)
+
+
+# <a id="4"></a>
+# # Results
+
+# In[213]:
+
+
+fig = go.Figure()
+
+fig.add_trace(go.Scatter(y = history.history['loss'],
+                    mode='lines+markers',
+                    name='Training loss'))
+fig.add_trace(go.Scatter(y = history.history['val_loss'],
+                    mode='lines+markers',
+                    name='Validation loss'))
+
+fig.update_layout(title_text = 'Loss of model')
+fig.show()
+
+
+# In[214]:
+
+
+fig = go.Figure()
+
+fig.add_trace(go.Scatter(y = history.history['accuracy'],
+                    mode='lines+markers',
+                    name='Training accuracy'))
+fig.add_trace(go.Scatter(y = history.history['val_accuracy'],
+                    mode='lines+markers',
+                    name='Validation accuracy'))
+
+fig.update_layout(title_text = 'Accuracy of model')
+fig.show()
+
+
+# I am using **val** folder as test data set for getting information accuracy on new dataset.
+
+# In[215]:
+
+
+test_gen = ImageDataGenerator(rescale = 1./255)
+test_generator = test_gen.flow_from_dataframe(
+    df_test, 
+    "C:/Users/ranya/Downloads/SOCOFing/SOCOFing/Altered", 
+    x_col='filename',
+    y_col=None,
+    class_mode= None,
+    target_size = (96, 103),
+    batch_size = 64,
+    shuffle = False
+)
+
+
+# In[95]:
+
+
+predict = model.predict_generator(test_generator, steps = np.ceil(df_test.shape[0] / 64))
+
+
+# In[216]:
+
+
+df_test['prediction'] = np.argmax(predict, axis=-1)
+label_map = dict((v,k) for k,v in train_generator.class_indices.items())
+df_test['prediction'] = df_test['prediction'].replace(label_map)
+df_test['prediction'] = df_test['prediction'].replace({ '1': 1, '0': 0 })
+
+
+# In[217]:
+
+
+train_generator.class_indices.items()
+
+
+# In[218]:
+
+
+fig = go.Figure(data=[go.Bar(x = ['Altered-Easy', 'Altered-Hard', 'Altered-Medium'], y = df_test['prediction'].value_counts())])
+fig.update_layout(title_text = 'Distribution of predicted classes')
+fig.show()
+
+
+# In[219]:
+
+
+df_test['correctPred'] = df_test.apply(lambda x: str(x['class']) == str(x['prediction']), axis=1)
+
+
+# In[220]:
+
+
+fig = go.Figure(data=[go.Bar(x = ['Correct prediction', 'False prediction'], y = df_test.correctPred.value_counts())])
+fig.update_layout(title_text = 'Correct prediction vs False prediction')
+fig.show()
+
+
+# In[221]:
+
+
+
+    import random
+    randomlist = []
+    for i in range(0,9):
+        n = random.randint(0,len(df_test))
+        randomlist.append(n)
+
+    fig = plt.figure(figsize=(15,8))
+    gs1 = gridspec.GridSpec(3, 3)
+    axs = []
+    for num in range(len(randomlist)):
+        row = df_test.iloc[[randomlist[num]]]
+        filename = row['filename'][randomlist[num]]
+        img = load_img("C:/Users/ranya/Downloads/SOCOFing/SOCOFing/Altered/"+filename, target_size= (96, 103))
+        axs.append(fig.add_subplot(gs1[num - 1]))
+        axs[-1].imshow(img)
+        axs[-1].set_title("Actual: " + df_test[df_test["filename"] == filename]["class"].iloc[0] + " Prediction: " + str(row['prediction'][randomlist[num]]) )
+    fig.subplots_adjust(hspace=0.3)
+    plt.show()
+    
+
+
+# In[223]:
+
+
+from tkinter import *
+
+
+
+top = Tk()
+top.title("Fingerprint")
+top.minsize(500,500)
+#Showing the Label
+label1 = Label(text="Enter Path")
+label1.pack()
+
+
+
+
+entry = Entry()
+entry.pack()
+
+
+
+image = image.reshape(-1, 96, 103, 3)
+image.shape
+result = model(image)
+result
+result = np.argmax(result)
+result
+
+
+
+def myfunction():
+    path = entry.get()
+    image = cv2.imread('path')
+
+
+    if result == 0:
+        res='Easy'
+    else:
+        if result == 1:
+            res='Hard'
+        else:
+            res='Meduim'
+    label1 = Label(text="The Class Number of The Image Is: " + str(result))
+    label1.pack()
+    label1 = Label(text="The Class Name of The Image Is: " + res)
+    label1.pack()
+
+
+
+
+
+
+button = Button(text="Enter" , command=myfunction)
+button.pack()
+
+
+
+
+
+top.mainloop()
+
+
+
+
